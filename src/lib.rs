@@ -99,6 +99,20 @@ mod tests {
     }
 
     #[test]
+    fn test_read_notexact() {
+        Python::with_gil(|py| -> PyResult<()> {
+            let io = py.import("io")?;
+            let file = io.call_method1("BytesIO", (&b"hello"[..], ))?;
+            let mut file = PyBinaryFile::from(file);
+            let mut buf = [0u8; 10];
+            let n = file.read(&mut buf)?;
+            assert_eq!(n, 5);
+            assert_eq!(&buf[..n], b"hello");
+            Ok(())
+        }).unwrap();
+    }
+
+    #[test]
     fn test_read_eof() {
         Python::with_gil(|py| -> PyResult<()> {
             let io = py.import("io")?;
@@ -147,6 +161,19 @@ mod tests {
             let mut buf = [0u8; 4];
             file.read_exact(&mut buf)?;
             assert_eq!(&buf, b"ello");
+            Ok::<(), PyErr>(())
+        }).unwrap();
+    }
+
+    #[test]
+    fn test_flush() {
+        Python::with_gil(|py| {
+            let io = py.import("io")?;
+            let file = io.call_method1("BytesIO", (&b""[..], ))?;
+            let mut file = PyBinaryFile::from(file);
+            file.write_all(b"hello")?;
+            file.flush()?;
+            assert_eq!(file.0.call_method0(py, "getvalue")?.extract::<&[u8]>(py)?, b"hello");
             Ok::<(), PyErr>(())
         }).unwrap();
     }
