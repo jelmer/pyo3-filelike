@@ -6,6 +6,12 @@ use std::os::fd::{AsFd, BorrowedFd, RawFd};
 #[derive(Debug)]
 pub struct PyBinaryFile(pyo3::PyObject);
 
+impl ToPyObject for PyBinaryFile {
+    fn to_object(&self, py: Python) -> PyObject {
+        self.0.clone_ref(py)
+    }
+}
+
 impl Clone for PyBinaryFile{
     fn clone(&self) -> Self {
         Python::with_gil(|py| {
@@ -76,7 +82,7 @@ impl From<pyo3::PyObject> for PyBinaryFile {
 }
 
 impl From<Bound<'_, PyAny>> for PyBinaryFile {
-    fn from<'a>(obj: Bound<'a, PyAny>) -> Self {
+    fn from(obj: Bound<'_, PyAny>) -> Self {
         PyBinaryFile(obj.unbind())
     }
 }
