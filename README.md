@@ -1,6 +1,6 @@
 # Rust compatible wrappers for file-like objects in Python
 
-This crate provides implementations of the ``Write``, ``Seek``, ``Read`` and ``AsRawFd``
+This create provides implementations of the ``Write``, ``Seek``, ``Read`` and ``AsRawFd``
 rust traits on top of file-likb objects in PyO3.
 
 ## Example
