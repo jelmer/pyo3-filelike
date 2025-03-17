@@ -1,6 +1,19 @@
 /// This crate provides a wrapper for file-like objects in Python that implement the `io`
 /// protocol, and allows them to be used as `Read`, `Write`, and `Seek` traits in Rust.
 ///
+/// Objects need to implement the `io` protocol. For the `Read` trait, the object must have a
+/// `read` method that takes a single argument, the number of bytes to read, and returns a `bytes`
+/// object. For the `Write` trait, the object must have a `write` method that takes a single
+/// argument, a `bytes` object. For the `Seek` trait, the object must have a `seek` method that
+/// takes two arguments, the offset and whence, and returns the new position.
+///
+/// The `mode` attribute is checked to ensure that the file is opened in binary mode.
+/// If the `mode` attribute is not present, the file is assumed to be opened in binary mode.
+///
+/// The `AsFd` trait is implemented for Unix-like systems, allowing the file to be used with
+/// functions that take a file descriptor. The `fileno` method is called to get the file
+/// descriptor.
+///
 /// # Example
 ///
 /// ```rust
@@ -18,6 +31,7 @@
 /// }).unwrap();
 
 use pyo3::prelude::*;
+use pyo3::exceptions::{PyValueError, PyAttributeError};
 use std::io::{Read, Write, Seek};
 #[cfg(any(unix, target_os = "wasi"))]
 use std::os::fd::{AsFd, BorrowedFd, RawFd};
@@ -95,15 +109,44 @@ impl AsFd for PyBinaryFile {
     }
 }
 
+impl PyBinaryFile {
+    fn new(file: PyObject) -> PyResult<Self> {
+        let o = PyBinaryFile(file);
+        o.check_mode('b')?;
+        Ok(o)
+    }
+
+    fn check_mode(&self, expected_mode: char) -> PyResult<()> {
+        Python::with_gil(|py| {
+            match self.0.getattr(py, "mode") {
+                Ok(mode) => {
+                    if mode.extract::<&str>(py)?.contains(expected_mode) {
+                        return Ok(());
+                    }
+                    Err(PyValueError::new_err(format!(
+                        "file must be opened in {} mode",
+                        expected_mode
+                    )))
+                }
+                Err(e) if e.is_instance_of::<PyAttributeError>(py) => {
+                    // Assume binary mode if mode attribute is not present
+                    Ok(())
+                }
+                Err(e) => return Err(e),
+            }
+        })
+    }
+}
+
 impl From<pyo3::PyObject> for PyBinaryFile {
     fn from(obj: pyo3::PyObject) -> Self {
-        PyBinaryFile(obj)
+        PyBinaryFile::new(obj).unwrap()
     }
 }
 
 impl From<Bound<'_, PyAny>> for PyBinaryFile {
     fn from(obj: Bound<'_, PyAny>) -> Self {
-        PyBinaryFile(obj.unbind())
+        PyBinaryFile::new(obj.into()).unwrap()
     }
 }
 
@@ -203,4 +246,5 @@ mod tests {
             Ok::<(), PyErr>(())
         }).unwrap();
     }
+
 }
