@@ -36,6 +36,8 @@ use std::io::{Read, Write, Seek};
 #[cfg(any(unix, target_os = "wasi"))]
 use std::os::fd::{AsFd, BorrowedFd, RawFd};
 
+use std::borrow::Cow;
+
 /// Rust wrapper for a Python file-like object that implements the `io` protocol.
 #[derive(Debug)]
 pub struct PyBinaryFile(pyo3::PyObject);
@@ -120,7 +122,7 @@ impl PyBinaryFile {
         Python::with_gil(|py| {
             match self.0.getattr(py, "mode") {
                 Ok(mode) => {
-                    if mode.extract::<&str>(py)?.contains(expected_mode) {
+                    if mode.extract::<Cow<str>>(py)?.contains(expected_mode) {
                         return Ok(());
                     }
                     Err(PyValueError::new_err(format!(
@@ -182,13 +184,11 @@ impl Read for PyTextFile {
                 return Ok(buf.len());
             }
             let text = self.inner.call_method1(py, "read", (buf.len() - self.buffer.len(), ))?;
-            let extra = if let Ok(t) = text.extract::<&str>(py) {
-                t.as_bytes()
+            if let Ok(t) = text.extract::<Cow<str>>(py) {
+                self.buffer.extend_from_slice(t.as_bytes());
             } else {
-                text.extract::<&[u8]>(py)?
-            };
-
-            self.buffer.extend_from_slice(extra);
+                self.buffer.extend_from_slice(text.extract::<&[u8]>(py)?);
+            }
 
             let len = std::cmp::min(self.buffer.len(), buf.len());
             buf[..len].copy_from_slice(&self.buffer[..len]);

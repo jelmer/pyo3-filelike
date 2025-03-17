@@ -10,4 +10,4 @@ repository = "https://github.com/jelmer/pyo3-filelike"
 pyo3 = ">=0.22, <0.25"
 
 [dev-dependencies]
-pyo3 = { version = ">=0.22, <0.25", features = ["auto-initialize"] }
+pyo3 = { version = ">=0.22, <0.25", features = ["auto-initialize", "abi3"] }
