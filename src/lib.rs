@@ -342,5 +342,22 @@ mod tests {
         }).unwrap();
     }
 
+    #[test]
+    fn test_read_text_unicode() {
+        // read halfway through a unicode character
+        let io = Python::with_gil(|py| -> PyResult<PyObject> {
+            let io = py.import("io")?;
+            let file = io.call_method1("StringIO", ("hello \u{1f600} world", ))?;
+            Ok(file.into())
+        }).unwrap();
 
+        let mut file = PyTextFile::from(io);
+        let mut buf = [0u8; 7];
+        file.read_exact(&mut buf).unwrap();
+        assert_eq!(&buf, b"hello \xf0");
+
+        let mut buf = [0u8; 1];
+        file.read_exact(&mut buf).unwrap();
+        assert_eq!(&buf, b"\x9f");
+    }
 }
