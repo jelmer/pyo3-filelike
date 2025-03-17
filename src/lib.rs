@@ -1,8 +1,28 @@
+/// This crate provides a wrapper for file-like objects in Python that implement the `io`
+/// protocol, and allows them to be used as `Read`, `Write`, and `Seek` traits in Rust.
+///
+/// # Example
+///
+/// ```rust
+/// use pyo3::prelude::*;
+/// use std::io::{Read, Write};
+///
+/// pyo3::Python::with_gil(|py| -> PyResult<()> {
+///    let io = py.import("io")?;
+///    let file = io.call_method1("BytesIO", (&b"hello"[..], ))?;
+///    let mut file = pyo3_filelike::PyBinaryFile::from(file);
+///    let mut buf = [0u8; 5];
+///    file.read_exact(&mut buf)?;
+///    assert_eq!(&buf, b"hello");
+///    Ok(())
+/// }).unwrap();
+
 use pyo3::prelude::*;
 use std::io::{Read, Write, Seek};
 #[cfg(any(unix, target_os = "wasi"))]
 use std::os::fd::{AsFd, BorrowedFd, RawFd};
 
+/// Rust wrapper for a Python file-like object that implements the `io` protocol.
 #[derive(Debug)]
 pub struct PyBinaryFile(pyo3::PyObject);
 
