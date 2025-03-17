@@ -18,6 +18,7 @@
 /// }).unwrap();
 
 use pyo3::prelude::*;
+use pyo3::exceptions::{PyValueError, PyAttributeError};
 use std::io::{Read, Write, Seek};
 #[cfg(any(unix, target_os = "wasi"))]
 use std::os::fd::{AsFd, BorrowedFd, RawFd};
@@ -95,15 +96,44 @@ impl AsFd for PyBinaryFile {
     }
 }
 
+impl PyBinaryFile {
+    fn new(file: PyObject) -> PyResult<Self> {
+        let o = PyBinaryFile(file);
+        o.check_mode('b')?;
+        Ok(o)
+    }
+
+    fn check_mode(&self, expected_mode: char) -> PyResult<()> {
+        Python::with_gil(|py| {
+            match self.0.getattr(py, "mode") {
+                Ok(mode) => {
+                    if mode.extract::<&str>(py)?.contains(expected_mode) {
+                        return Ok(());
+                    }
+                    Err(PyValueError::new_err(format!(
+                        "file must be opened in {} mode",
+                        expected_mode
+                    )))
+                }
+                Err(e) if e.is_instance_of::<PyAttributeError>(py) => {
+                    // Assume binary mode if mode attribute is not present
+                    Ok(())
+                }
+                Err(e) => return Err(e),
+            }
+        })
+    }
+}
+
 impl From<pyo3::PyObject> for PyBinaryFile {
     fn from(obj: pyo3::PyObject) -> Self {
-        PyBinaryFile(obj)
+        PyBinaryFile::new(obj).unwrap()
     }
 }
 
 impl From<Bound<'_, PyAny>> for PyBinaryFile {
     fn from(obj: Bound<'_, PyAny>) -> Self {
-        PyBinaryFile(obj.unbind())
+        PyBinaryFile::new(obj.into()).unwrap()
     }
 }
 
@@ -203,4 +233,5 @@ mod tests {
             Ok::<(), PyErr>(())
         }).unwrap();
     }
+
 }
