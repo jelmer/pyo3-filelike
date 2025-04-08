@@ -122,7 +122,14 @@ impl PyBinaryFile {
         Python::with_gil(|py| {
             match self.0.getattr(py, "mode") {
                 Ok(mode) => {
-                    if mode.extract::<Cow<str>>(py)?.contains(expected_mode) {
+                    let mode_str = match mode.extract::<Cow<str>>(py) {
+                        Ok(mode_str) => mode_str,
+                        Err(_) => {
+                            // Assume binary mode if mode attribute is not a string
+                            return Ok(());
+                        }
+                    };
+                    if mode_str.contains(expected_mode) {
                         return Ok(());
                     }
                     Err(PyValueError::new_err(format!(
