@@ -11,10 +11,26 @@ jobs:
   build:
 
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        version-mode: ['maximal', 'minimal']
 
     steps:
     - uses: actions/checkout@v5
-    - name: Build
+    - name: Install cargo-minimal-versions and cargo-hack
+      if: matrix.version-mode == 'minimal'
+      run: |
+        cargo install cargo-minimal-versions --locked
+        cargo install cargo-hack --locked
+    - name: Build (maximal versions)
+      if: matrix.version-mode == 'maximal'
       run: cargo build --verbose
-    - name: Run tests
+    - name: Run tests (maximal versions)
+      if: matrix.version-mode == 'maximal'
       run: cargo test --verbose
+    - name: Build (minimal versions)
+      if: matrix.version-mode == 'minimal'
+      run: cargo minimal-versions build --verbose
+    - name: Run tests (minimal versions)
+      if: matrix.version-mode == 'minimal'
+      run: cargo minimal-versions test --verbose
