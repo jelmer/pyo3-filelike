@@ -11,7 +11,7 @@ use std::borrow::Cow;
 
 /// Rust wrapper for a Python file-like object that implements the `io` protocol.
 #[derive(Debug)]
-pub struct PyBinaryFile(pyo3::PyObject);
+pub struct PyBinaryFile(Py<PyAny>);
 
 impl<'py> IntoPyObject<'py> for PyBinaryFile {
     type Target = PyAny;
@@ -28,7 +28,7 @@ impl<'py> IntoPyObject<'py> for PyBinaryFile {
 
 impl Clone for PyBinaryFile{
     fn clone(&self) -> Self {
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             PyBinaryFile::from(self.0.clone_ref(py))
         })
     }
@@ -36,7 +36,7 @@ impl Clone for PyBinaryFile{
 
 impl Read for PyBinaryFile {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             let bytes = self.0.call_method1(py, "read", (buf.len(), ))?;
             let bytes = bytes.extract::<&[u8]>(py)?;
             let len = std::cmp::min(buf.len(), bytes.len());
@@ -48,7 +48,7 @@ impl Read for PyBinaryFile {
 
 impl Write for PyBinaryFile {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             let bytes = pyo3::types::PyBytes::new(py, buf);
             self.0.call_method1(py, "write", (bytes, ))?;
             Ok(buf.len())
@@ -56,7 +56,7 @@ impl Write for PyBinaryFile {
     }
 
     fn flush(&mut self) -> std::io::Result<()> {
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             self.0.call_method0(py, "flush")?;
             Ok(())
         })
@@ -65,7 +65,7 @@ impl Write for PyBinaryFile {
 
 impl Seek for PyBinaryFile {
     fn seek(&mut self, pos: std::io::SeekFrom) -> std::io::Result<u64> {
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             let (whence, offset) = match pos {
                 std::io::SeekFrom::Start(offset) => (0, offset as i64),
                 std::io::SeekFrom::End(offset) => (2, offset),
@@ -81,7 +81,7 @@ impl Seek for PyBinaryFile {
 #[cfg(any(unix, target_os = "wasi"))]
 impl AsFd for PyBinaryFile {
     fn as_fd(&self) -> BorrowedFd<'_> {
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             let fd = self.0.call_method0(py, "fileno")?;
             let fd = fd.extract::<RawFd>(py)?;
             Ok::<BorrowedFd<'_>, PyErr>(unsafe { BorrowedFd::borrow_raw(fd) })
@@ -90,14 +90,14 @@ impl AsFd for PyBinaryFile {
 }
 
 impl PyBinaryFile {
-    fn new(file: PyObject) -> PyResult<Self> {
+    fn new(file: Py<PyAny>) -> PyResult<Self> {
         let o = PyBinaryFile(file);
         o.check_mode('b')?;
         Ok(o)
     }
 
     fn check_mode(&self, expected_mode: char) -> PyResult<()> {
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             match self.0.getattr(py, "mode") {
                 Ok(mode) => {
                     let mode_str = match mode.extract::<Cow<str>>(py) {
@@ -125,8 +125,8 @@ impl PyBinaryFile {
     }
 }
 
-impl From<pyo3::PyObject> for PyBinaryFile {
-    fn from(obj: pyo3::PyObject) -> Self {
+impl From<Py<PyAny>> for PyBinaryFile {
+    fn from(obj: Py<PyAny>) -> Self {
         PyBinaryFile::new(obj).unwrap()
     }
 }
@@ -149,20 +149,20 @@ impl From<Bound<'_, PyAny>> for PyBinaryFile {
 /// file-like objects seek by characters, not bytes.
 #[derive(Debug)]
 pub struct PyTextFile {
-    inner: PyObject,
+    inner: Py<PyAny>,
     buffer: Vec<u8>
 }
 
 impl PyTextFile {
     /// Create a new `PyTextFile` from a Python file-like object and an encoding.
-    pub fn new(file: PyObject) -> PyResult<Self> {
+    pub fn new(file: Py<PyAny>) -> PyResult<Self> {
         Ok(PyTextFile{ inner: file, buffer: Vec::new() })
     }
 }
 
 impl Read for PyTextFile {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             if self.buffer.len() >= buf.len() {
                 buf.copy_from_slice(&self.buffer[..buf.len()]);
                 self.buffer.drain(..buf.len());
@@ -183,8 +183,8 @@ impl Read for PyTextFile {
     }
 }
 
-impl From<pyo3::PyObject> for PyTextFile {
-    fn from(obj: pyo3::PyObject) -> Self {
+impl From<Py<PyAny>> for PyTextFile {
+    fn from(obj: Py<PyAny>) -> Self {
         PyTextFile::new(obj).unwrap()
     }
 }
@@ -210,7 +210,7 @@ impl<'py> IntoPyObject<'py> for PyTextFile {
 
 impl Clone for PyTextFile{
     fn clone(&self) -> Self {
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             PyTextFile::from(self.inner.clone_ref(py))
         })
     }
@@ -225,7 +225,7 @@ mod tests {
 
     #[test]
     fn test_read() {
-        Python::with_gil(|py| -> PyResult<()> {
+        Python::attach(|py| -> PyResult<()> {
             let io = py.import("io")?;
             let file = io.call_method1("BytesIO", (&b"hello"[..], ))?;
             let mut file = PyBinaryFile::from(file);
@@ -238,7 +238,7 @@ mod tests {
 
     #[test]
     fn test_read_notexact() {
-        Python::with_gil(|py| -> PyResult<()> {
+        Python::attach(|py| -> PyResult<()> {
             let io = py.import("io")?;
             let file = io.call_method1("BytesIO", (&b"hello"[..], ))?;
             let mut file = PyBinaryFile::from(file);
@@ -252,7 +252,7 @@ mod tests {
 
     #[test]
     fn test_read_eof() {
-        Python::with_gil(|py| -> PyResult<()> {
+        Python::attach(|py| -> PyResult<()> {
             let io = py.import("io")?;
             let file = io.call_method1("BytesIO", (&b"hello"[..], ))?;
             let mut file = PyBinaryFile::from(file);
@@ -265,7 +265,7 @@ mod tests {
 
     #[test]
     fn test_read_to_end() {
-        Python::with_gil(|py| -> PyResult<()> {
+        Python::attach(|py| -> PyResult<()> {
             let io = py.import("io")?;
             let file = io.call_method1("BytesIO", (&b"hello"[..], ))?;
             let mut file = PyBinaryFile::from(file);
@@ -278,7 +278,7 @@ mod tests {
 
     #[test]
     fn test_write() {
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             let io = py.import("io")?;
             let file = io.call_method1("BytesIO", (&b""[..], ))?;
             let mut file = PyBinaryFile::from(file);
@@ -291,7 +291,7 @@ mod tests {
 
     #[test]
     fn test_seek() {
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             let io = py.import("io")?;
             let file = io.call_method1("BytesIO", (&b"hello"[..], ))?;
             let mut file = PyBinaryFile::from(file);
@@ -305,7 +305,7 @@ mod tests {
 
     #[test]
     fn test_flush() {
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             let io = py.import("io")?;
             let file = io.call_method1("BytesIO", (&b""[..], ))?;
             let mut file = PyBinaryFile::from(file);
@@ -318,7 +318,7 @@ mod tests {
 
     #[test]
     fn test_read_text() {
-        Python::with_gil(|py| -> PyResult<()> {
+        Python::attach(|py| -> PyResult<()> {
             let io = py.import("io")?;
             let file = io.call_method1("StringIO", ("hello world", ))?;
             let mut file = PyTextFile::from(file);
@@ -337,7 +337,7 @@ mod tests {
     #[test]
     fn test_read_text_unicode() {
         // read halfway through a unicode character
-        let io = Python::with_gil(|py| -> PyResult<PyObject> {
+        let io = Python::attach(|py| -> PyResult<Py<PyAny>> {
             let io = py.import("io")?;
             let file = io.call_method1("StringIO", ("hello \u{1f600} world", ))?;
             Ok(file.into())
