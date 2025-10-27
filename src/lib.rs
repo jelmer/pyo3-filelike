@@ -2,8 +2,8 @@
 #![doc = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/README.md"))]
 use pyo3::prelude::*;
 
-use pyo3::exceptions::{PyValueError, PyAttributeError};
-use std::io::{Read, Write, Seek};
+use pyo3::exceptions::{PyAttributeError, PyValueError};
+use std::io::{Read, Seek, Write};
 #[cfg(any(unix, target_os = "wasi"))]
 use std::os::fd::{AsFd, BorrowedFd, RawFd};
 
@@ -26,19 +26,19 @@ impl<'py> IntoPyObject<'py> for PyBinaryFile {
     }
 }
 
-impl Clone for PyBinaryFile{
+impl Clone for PyBinaryFile {
     fn clone(&self) -> Self {
-        Python::attach(|py| {
-            PyBinaryFile::from(self.0.clone_ref(py))
-        })
+        Python::attach(|py| PyBinaryFile::from(self.0.clone_ref(py)))
     }
 }
 
 impl Read for PyBinaryFile {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         Python::attach(|py| {
-            let bytes = self.0.call_method1(py, "read", (buf.len(), ))?;
-            let bytes = bytes.extract::<&[u8]>(py)?;
+            let bytes = self.0.call_method1(py, "read", (buf.len(),))?;
+            let bytes = bytes
+                .extract::<&[u8]>(py)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
             let len = std::cmp::min(buf.len(), bytes.len());
             buf[..len].copy_from_slice(&bytes[..len]);
             Ok(len)
@@ -50,7 +50,7 @@ impl Write for PyBinaryFile {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         Python::attach(|py| {
             let bytes = pyo3::types::PyBytes::new(py, buf);
-            self.0.call_method1(py, "write", (bytes, ))?;
+            self.0.call_method1(py, "write", (bytes,))?;
             Ok(buf.len())
         })
     }
@@ -85,7 +85,8 @@ impl AsFd for PyBinaryFile {
             let fd = self.0.call_method0(py, "fileno")?;
             let fd = fd.extract::<RawFd>(py)?;
             Ok::<BorrowedFd<'_>, PyErr>(unsafe { BorrowedFd::borrow_raw(fd) })
-        }).unwrap()
+        })
+        .unwrap()
     }
 }
 
@@ -119,7 +120,7 @@ impl PyBinaryFile {
                     // Assume binary mode if mode attribute is not present
                     Ok(())
                 }
-                Err(e) => return Err(e),
+                Err(e) => Err(e),
             }
         })
     }
@@ -150,13 +151,16 @@ impl From<Bound<'_, PyAny>> for PyBinaryFile {
 #[derive(Debug)]
 pub struct PyTextFile {
     inner: Py<PyAny>,
-    buffer: Vec<u8>
+    buffer: Vec<u8>,
 }
 
 impl PyTextFile {
     /// Create a new `PyTextFile` from a Python file-like object and an encoding.
     pub fn new(file: Py<PyAny>) -> PyResult<Self> {
-        Ok(PyTextFile{ inner: file, buffer: Vec::new() })
+        Ok(PyTextFile {
+            inner: file,
+            buffer: Vec::new(),
+        })
     }
 }
 
@@ -168,11 +172,16 @@ impl Read for PyTextFile {
                 self.buffer.drain(..buf.len());
                 return Ok(buf.len());
             }
-            let text = self.inner.call_method1(py, "read", (buf.len() - self.buffer.len(), ))?;
+            let text = self
+                .inner
+                .call_method1(py, "read", (buf.len() - self.buffer.len(),))?;
             if let Ok(t) = text.extract::<Cow<str>>(py) {
                 self.buffer.extend_from_slice(t.as_bytes());
             } else {
-                self.buffer.extend_from_slice(text.extract::<&[u8]>(py)?);
+                self.buffer
+                    .extend_from_slice(text.extract::<&[u8]>(py).map_err(|e| {
+                        std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string())
+                    })?);
             }
 
             let len = std::cmp::min(self.buffer.len(), buf.len());
@@ -208,16 +217,11 @@ impl<'py> IntoPyObject<'py> for PyTextFile {
     }
 }
 
-impl Clone for PyTextFile{
+impl Clone for PyTextFile {
     fn clone(&self) -> Self {
-        Python::attach(|py| {
-            PyTextFile::from(self.inner.clone_ref(py))
-        })
+        Python::attach(|py| PyTextFile::from(self.inner.clone_ref(py)))
     }
 }
-
-
-
 
 #[cfg(test)]
 mod tests {
@@ -227,100 +231,113 @@ mod tests {
     fn test_read() {
         Python::attach(|py| -> PyResult<()> {
             let io = py.import("io")?;
-            let file = io.call_method1("BytesIO", (&b"hello"[..], ))?;
+            let file = io.call_method1("BytesIO", (&b"hello"[..],))?;
             let mut file = PyBinaryFile::from(file);
             let mut buf = [0u8; 5];
             file.read_exact(&mut buf)?;
             assert_eq!(&buf, b"hello");
             Ok(())
-        }).unwrap();
+        })
+        .unwrap();
     }
 
     #[test]
     fn test_read_notexact() {
         Python::attach(|py| -> PyResult<()> {
             let io = py.import("io")?;
-            let file = io.call_method1("BytesIO", (&b"hello"[..], ))?;
+            let file = io.call_method1("BytesIO", (&b"hello"[..],))?;
             let mut file = PyBinaryFile::from(file);
             let mut buf = [0u8; 10];
             let n = file.read(&mut buf)?;
             assert_eq!(n, 5);
             assert_eq!(&buf[..n], b"hello");
             Ok(())
-        }).unwrap();
+        })
+        .unwrap();
     }
 
     #[test]
     fn test_read_eof() {
         Python::attach(|py| -> PyResult<()> {
             let io = py.import("io")?;
-            let file = io.call_method1("BytesIO", (&b"hello"[..], ))?;
+            let file = io.call_method1("BytesIO", (&b"hello"[..],))?;
             let mut file = PyBinaryFile::from(file);
             let mut buf = [0u8; 6];
             let err = file.read_exact(&mut buf).unwrap_err();
             assert_eq!(err.kind(), std::io::ErrorKind::UnexpectedEof);
             Ok(())
-        }).unwrap();
+        })
+        .unwrap();
     }
 
     #[test]
     fn test_read_to_end() {
         Python::attach(|py| -> PyResult<()> {
             let io = py.import("io")?;
-            let file = io.call_method1("BytesIO", (&b"hello"[..], ))?;
+            let file = io.call_method1("BytesIO", (&b"hello"[..],))?;
             let mut file = PyBinaryFile::from(file);
             let mut buf = Vec::new();
             file.read_to_end(&mut buf)?;
             assert_eq!(&buf, b"hello");
             Ok(())
-        }).unwrap();
+        })
+        .unwrap();
     }
 
     #[test]
     fn test_write() {
         Python::attach(|py| {
             let io = py.import("io")?;
-            let file = io.call_method1("BytesIO", (&b""[..], ))?;
+            let file = io.call_method1("BytesIO", (&b""[..],))?;
             let mut file = PyBinaryFile::from(file);
             file.write_all(b"hello ")?;
             file.write_all(b"world")?;
-            assert_eq!(file.0.call_method0(py, "getvalue")?.extract::<&[u8]>(py)?, b"hello world");
+            assert_eq!(
+                file.0.call_method0(py, "getvalue")?.extract::<&[u8]>(py)?,
+                b"hello world"
+            );
             Ok::<(), PyErr>(())
-        }).unwrap();
+        })
+        .unwrap();
     }
 
     #[test]
     fn test_seek() {
         Python::attach(|py| {
             let io = py.import("io")?;
-            let file = io.call_method1("BytesIO", (&b"hello"[..], ))?;
+            let file = io.call_method1("BytesIO", (&b"hello"[..],))?;
             let mut file = PyBinaryFile::from(file);
             file.seek(std::io::SeekFrom::Start(1))?;
             let mut buf = [0u8; 4];
             file.read_exact(&mut buf)?;
             assert_eq!(&buf, b"ello");
             Ok::<(), PyErr>(())
-        }).unwrap();
+        })
+        .unwrap();
     }
 
     #[test]
     fn test_flush() {
         Python::attach(|py| {
             let io = py.import("io")?;
-            let file = io.call_method1("BytesIO", (&b""[..], ))?;
+            let file = io.call_method1("BytesIO", (&b""[..],))?;
             let mut file = PyBinaryFile::from(file);
             file.write_all(b"hello")?;
             file.flush()?;
-            assert_eq!(file.0.call_method0(py, "getvalue")?.extract::<&[u8]>(py)?, b"hello");
+            assert_eq!(
+                file.0.call_method0(py, "getvalue")?.extract::<&[u8]>(py)?,
+                b"hello"
+            );
             Ok::<(), PyErr>(())
-        }).unwrap();
+        })
+        .unwrap();
     }
 
     #[test]
     fn test_read_text() {
         Python::attach(|py| -> PyResult<()> {
             let io = py.import("io")?;
-            let file = io.call_method1("StringIO", ("hello world", ))?;
+            let file = io.call_method1("StringIO", ("hello world",))?;
             let mut file = PyTextFile::from(file);
             let mut buf = [0u8; 5];
             file.read_exact(&mut buf)?;
@@ -331,7 +348,8 @@ mod tests {
             file.read_to_end(&mut buf).unwrap();
             assert_eq!(&buf, b"d");
             Ok(())
-        }).unwrap();
+        })
+        .unwrap();
     }
 
     #[test]
@@ -339,9 +357,10 @@ mod tests {
         // read halfway through a unicode character
         let io = Python::attach(|py| -> PyResult<Py<PyAny>> {
             let io = py.import("io")?;
-            let file = io.call_method1("StringIO", ("hello \u{1f600} world", ))?;
+            let file = io.call_method1("StringIO", ("hello \u{1f600} world",))?;
             Ok(file.into())
-        }).unwrap();
+        })
+        .unwrap();
 
         let mut file = PyTextFile::from(io);
         let mut buf = [0u8; 7];
