@@ -16,7 +16,7 @@ jobs:
         version-mode: ['maximal', 'minimal']
 
     steps:
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@v6
     - name: Install cargo-minimal-versions and cargo-hack
       if: matrix.version-mode == 'minimal'
       run: |
