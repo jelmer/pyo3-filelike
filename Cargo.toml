@@ -7,7 +7,7 @@ license = "Apache-2.0"
 repository = "https://github.com/jelmer/pyo3-filelike"
 
 [dependencies]
-pyo3 = ">=0.26, <0.28"
+pyo3 = ">=0.26, <0.29"
 
 [dev-dependencies]
-pyo3 = { version = ">=0.26, <0.28", features = ["auto-initialize", "abi3"] }
+pyo3 = { version = ">=0.26, <0.29", features = ["auto-initialize", "abi3"] }
