@@ -22,7 +22,7 @@ descriptor.
 use pyo3::prelude::*;
 use std::io::{Read, Write};
 
-pyo3::Python::with_gil(|py| -> PyResult<()> {
+pyo3::Python::attach(|py| -> PyResult<()> {
    let io = py.import("io")?;
    let file = io.call_method1("BytesIO", (&b"hello"[..], ))?;
    let mut file = pyo3_filelike::PyBinaryFile::from(file);
