@@ -124,6 +124,44 @@ impl PyBinaryFile {
             }
         })
     }
+
+    /// Check if the underlying Python file-like object supports seeking.
+    ///
+    /// This method calls the Python `seekable()` method on the underlying object
+    /// to determine if seek operations are supported at runtime.
+    ///
+    /// Note: This must be checked at runtime rather than compile time because:
+    /// - The wrapped Python object is dynamically typed (`Py<PyAny>`)
+    /// - Whether seeking is supported depends on the specific Python object's
+    ///   implementation, which cannot be known at compile time
+    /// - Rust's trait system operates on static types, but Python objects have
+    ///   runtime capabilities that vary between instances
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(true)` if the file supports seeking, `Ok(false)` if not,
+    /// or `Err` if the `seekable()` method call fails.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use pyo3::prelude::*;
+    /// use pyo3_filelike::PyBinaryFile;
+    ///
+    /// Python::attach(|py| -> PyResult<()> {
+    ///     let io = py.import("io")?;
+    ///     let file = io.call_method1("BytesIO", (&b"hello"[..],))?;
+    ///     let file = PyBinaryFile::from(file);
+    ///     assert_eq!(file.seekable()?, true);
+    ///     Ok(())
+    /// }).unwrap();
+    /// ```
+    pub fn seekable(&self) -> PyResult<bool> {
+        Python::attach(|py| {
+            let result = self.0.call_method0(py, "seekable")?;
+            result.extract::<bool>(py)
+        })
+    }
 }
 
 impl From<Py<PyAny>> for PyBinaryFile {
@@ -160,6 +198,44 @@ impl PyTextFile {
         Ok(PyTextFile {
             inner: file,
             buffer: Vec::new(),
+        })
+    }
+
+    /// Check if the underlying Python file-like object supports seeking.
+    ///
+    /// This method calls the Python `seekable()` method on the underlying object
+    /// to determine if seek operations are supported at runtime.
+    ///
+    /// Note: This must be checked at runtime rather than compile time because:
+    /// - The wrapped Python object is dynamically typed (`Py<PyAny>`)
+    /// - Whether seeking is supported depends on the specific Python object's
+    ///   implementation, which cannot be known at compile time
+    /// - Rust's trait system operates on static types, but Python objects have
+    ///   runtime capabilities that vary between instances
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(true)` if the file supports seeking, `Ok(false)` if not,
+    /// or `Err` if the `seekable()` method call fails.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use pyo3::prelude::*;
+    /// use pyo3_filelike::PyTextFile;
+    ///
+    /// Python::attach(|py| -> PyResult<()> {
+    ///     let io = py.import("io")?;
+    ///     let file = io.call_method1("StringIO", ("hello",))?;
+    ///     let file = PyTextFile::from(file);
+    ///     assert_eq!(file.seekable()?, true);
+    ///     Ok(())
+    /// }).unwrap();
+    /// ```
+    pub fn seekable(&self) -> PyResult<bool> {
+        Python::attach(|py| {
+            let result = self.inner.call_method0(py, "seekable")?;
+            result.extract::<bool>(py)
         })
     }
 }
@@ -226,6 +302,7 @@ impl Clone for PyTextFile {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pyo3::ffi::c_str;
 
     #[test]
     fn test_read() {
@@ -370,5 +447,113 @@ mod tests {
         let mut buf = [0u8; 1];
         file.read_exact(&mut buf).unwrap();
         assert_eq!(&buf, b"\x9f");
+    }
+
+    #[test]
+    fn test_seekable_binary() {
+        Python::attach(|py| -> PyResult<()> {
+            let io = py.import("io")?;
+            let file = io.call_method1("BytesIO", (&b"hello"[..],))?;
+            let file = PyBinaryFile::from(file);
+            assert_eq!(file.seekable()?, true);
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn test_seekable_text() {
+        Python::attach(|py| -> PyResult<()> {
+            let io = py.import("io")?;
+            let file = io.call_method1("StringIO", ("hello",))?;
+            let file = PyTextFile::from(file);
+            assert_eq!(file.seekable()?, true);
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn test_non_seekable_binary() {
+        Python::attach(|py| -> PyResult<()> {
+            // Create a custom non-seekable file-like object
+            let locals = pyo3::types::PyDict::new(py);
+            py.run(
+                c_str!(
+                    r#"class NonSeekableFile:
+    def __init__(self):
+        self.data = b"hello"
+        self.pos = 0
+
+    def read(self, n=-1):
+        if n == -1:
+            result = self.data[self.pos:]
+            self.pos = len(self.data)
+        else:
+            result = self.data[self.pos:self.pos + n]
+            self.pos += len(result)
+        return result
+
+    def write(self, data):
+        return len(data)
+
+    def flush(self):
+        pass
+
+    def seekable(self):
+        return False
+
+    @property
+    def mode(self):
+        return 'rb'
+
+file = NonSeekableFile()"#
+                ),
+                None,
+                Some(&locals),
+            )?;
+            let file = locals.get_item("file")?.unwrap();
+            let file = PyBinaryFile::from(file);
+            assert_eq!(file.seekable()?, false);
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn test_non_seekable_text() {
+        Python::attach(|py| -> PyResult<()> {
+            // Create a custom non-seekable file-like object
+            let locals = pyo3::types::PyDict::new(py);
+            py.run(
+                c_str!(
+                    r#"class NonSeekableTextFile:
+    def __init__(self):
+        self.data = "hello"
+        self.pos = 0
+
+    def read(self, n=-1):
+        if n == -1:
+            result = self.data[self.pos:]
+            self.pos = len(self.data)
+        else:
+            result = self.data[self.pos:self.pos + n]
+            self.pos += len(result)
+        return result
+
+    def seekable(self):
+        return False
+
+file = NonSeekableTextFile()"#
+                ),
+                None,
+                Some(&locals),
+            )?;
+            let file = locals.get_item("file")?.unwrap();
+            let file = PyTextFile::from(file);
+            assert_eq!(file.seekable()?, false);
+            Ok(())
+        })
+        .unwrap();
     }
 }
